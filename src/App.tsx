@@ -13,7 +13,14 @@ import {
   Copy, 
   Check,
   ChevronDown,
-  Info
+  Info,
+  Anchor,
+  Wind,
+  Waves,
+  Gauge,
+  History,
+  Trash2,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -23,7 +30,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type Category = 'length' | 'weight' | 'volume' | 'temperature';
+type Category = 'length' | 'weight' | 'speed' | 'pressure' | 'temperature';
 
 interface Unit {
   label: string;
@@ -32,41 +39,52 @@ interface Unit {
   offset?: number; // For temperature
 }
 
+interface HistoryItem {
+  id: number;
+  category: string;
+  from_unit: string;
+  to_unit: string;
+  input_value: number;
+  output_value: number;
+  timestamp: string;
+}
+
 const CATEGORIES: { id: Category; label: string; icon: any }[] = [
-  { id: 'length', label: 'Length', icon: Ruler },
+  { id: 'length', label: 'Distance', icon: Ruler },
+  { id: 'speed', label: 'Speed', icon: Anchor },
+  { id: 'pressure', label: 'Pressure', icon: Gauge },
+  { id: 'temperature', label: 'Weather', icon: Thermometer },
   { id: 'weight', label: 'Weight', icon: Scale },
-  { id: 'volume', label: 'Volume', icon: Droplets },
-  { id: 'temperature', label: 'Temperature', icon: Thermometer },
 ];
 
 const UNITS: Record<Category, Unit[]> = {
   length: [
-    { label: 'Millimeters (mm)', value: 'mm', factor: 0.001 },
-    { label: 'Centimeters (cm)', value: 'cm', factor: 0.01 },
+    { label: 'Nautical Miles (nmi)', value: 'nmi', factor: 1852 },
+    { label: 'Fathoms (ftm)', value: 'ftm', factor: 1.8288 },
     { label: 'Meters (m)', value: 'm', factor: 1 },
     { label: 'Kilometers (km)', value: 'km', factor: 1000 },
-    { label: 'Inches (in)', value: 'in', factor: 0.0254 },
     { label: 'Feet (ft)', value: 'ft', factor: 0.3048 },
     { label: 'Yards (yd)', value: 'yd', factor: 0.9144 },
     { label: 'Miles (mi)', value: 'mi', factor: 1609.344 },
   ],
-  weight: [
-    { label: 'Milligrams (mg)', value: 'mg', factor: 0.000001 },
-    { label: 'Grams (g)', value: 'g', factor: 0.001 },
-    { label: 'Kilograms (kg)', value: 'kg', factor: 1 },
-    { label: 'Ounces (oz)', value: 'oz', factor: 0.0283495 },
-    { label: 'Pounds (lb)', value: 'lb', factor: 0.453592 },
+  speed: [
+    { label: 'Knots (kt)', value: 'kt', factor: 1.852 },
+    { label: 'm/s', value: 'ms', factor: 3.6 },
+    { label: 'km/h', value: 'kmh', factor: 1 },
+    { label: 'mph', value: 'mph', factor: 1.60934 },
   ],
-  volume: [
-    { label: 'Milliliters (ml)', value: 'ml', factor: 0.001 },
-    { label: 'Liters (l)', value: 'l', factor: 1 },
-    { label: 'Teaspoons (tsp)', value: 'tsp', factor: 0.00000492892 },
-    { label: 'Tablespoons (tbsp)', value: 'tbsp', factor: 0.0000147868 },
-    { label: 'Fluid Ounces (fl-oz)', value: 'fl-oz', factor: 0.0000295735 },
-    { label: 'Cups', value: 'cup', factor: 0.000236588 },
-    { label: 'Pints (pt)', value: 'pt', factor: 0.000473176 },
-    { label: 'Quarts (qt)', value: 'qt', factor: 0.000946353 },
-    { label: 'Gallons (gal)', value: 'gal', factor: 0.00378541 },
+  pressure: [
+    { label: 'Hectopascals (hPa)', value: 'hpa', factor: 1 },
+    { label: 'Millibars (mb)', value: 'mb', factor: 1 },
+    { label: 'Inches of Mercury (inHg)', value: 'inhg', factor: 33.8639 },
+    { label: 'Millimeters of Mercury (mmHg)', value: 'mmhg', factor: 1.33322 },
+    { label: 'PSI', value: 'psi', factor: 68.9476 },
+  ],
+  weight: [
+    { label: 'Metric Tons (t)', value: 't', factor: 1000 },
+    { label: 'Kilograms (kg)', value: 'kg', factor: 1 },
+    { label: 'Grams (g)', value: 'g', factor: 0.001 },
+    { label: 'Pounds (lb)', value: 'lb', factor: 0.453592 },
   ],
   temperature: [
     { label: 'Celsius (°C)', value: 'C', offset: 0 },
@@ -81,6 +99,8 @@ export default function App() {
   const [toUnit, setToUnit] = useState<string>('');
   const [inputValue, setInputValue] = useState<string>('1');
   const [copied, setCopied] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Initialize units when category changes
   useEffect(() => {
@@ -88,6 +108,53 @@ export default function App() {
     setFromUnit(units[0].value);
     setToUnit(units[1]?.value || units[0].value);
   }, [category]);
+
+  // Fetch history on mount
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const fetchHistory = async () => {
+    try {
+      const response = await fetch('/api/history');
+      if (response.ok) {
+        const data = await response.json();
+        setHistory(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch history:', error);
+    }
+  };
+
+  const saveHistory = async (output: number) => {
+    try {
+      await fetch('/api/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category,
+          fromUnit,
+          toUnit,
+          inputValue: parseFloat(inputValue),
+          outputValue: output
+        })
+      });
+      fetchHistory();
+    } catch (error) {
+      console.error('Failed to save history:', error);
+    }
+  };
+
+  const clearHistory = async () => {
+    try {
+      const response = await fetch('/api/history', { method: 'DELETE' });
+      if (response.ok) {
+        setHistory([]);
+      }
+    } catch (error) {
+      console.error('Failed to clear history:', error);
+    }
+  };
 
   const result = useMemo(() => {
     const val = parseFloat(inputValue);
@@ -116,6 +183,16 @@ export default function App() {
     }
   }, [category, fromUnit, toUnit, inputValue]);
 
+  // Save to history when result changes
+  useEffect(() => {
+    if (result !== null && inputValue !== '' && !isNaN(parseFloat(inputValue))) {
+      const timer = setTimeout(() => {
+        saveHistory(result);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [result]);
+
   const handleSwap = () => {
     setFromUnit(toUnit);
     setToUnit(fromUnit);
@@ -135,138 +212,257 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-indigo-100 p-4 md:p-8 flex flex-col items-center justify-center">
+    <div className="min-h-screen bg-[#0F172A] text-slate-100 font-sans selection:bg-sky-500/30 p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
+      {/* Background Decorative Elements */}
+      <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-10">
+        <Waves className="absolute -top-20 -left-20 w-96 h-96 text-sky-500" />
+        <Anchor className="absolute -bottom-20 -right-20 w-96 h-96 text-sky-500" />
+      </div>
+
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-2xl"
+        className="w-full max-w-2xl relative z-10"
       >
         {/* Header */}
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl font-semibold tracking-tight mb-2">Metric Master</h1>
-          <p className="text-[#6B7280] text-sm uppercase tracking-widest font-medium">Precision Unit Conversion</p>
+        <header className="mb-8 text-center relative">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-bold uppercase tracking-widest mb-4">
+            <Anchor size={12} />
+            Maritime Standard
+          </div>
+          <h1 className="text-4xl font-semibold tracking-tight mb-2 text-white">Maritime Master</h1>
+          <p className="text-slate-400 text-sm uppercase tracking-widest font-medium">Navigational & Weather Conversion</p>
+          
+          <button 
+            onClick={() => setShowHistory(!showHistory)}
+            className="absolute right-0 top-0 p-2 rounded-full bg-slate-800/50 border border-slate-700 text-slate-400 hover:text-sky-400 transition-colors"
+            title="View History"
+          >
+            <History size={20} />
+          </button>
         </header>
 
-        {/* Category Tabs */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8">
-          {CATEGORIES.map((cat) => {
-            const Icon = cat.icon;
-            const isActive = category === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setCategory(cat.id)}
-                className={cn(
-                  "flex items-center gap-2 px-5 py-2.5 rounded-full transition-all duration-200 text-sm font-medium border",
-                  isActive 
-                    ? "bg-white border-[#E5E7EB] shadow-sm text-indigo-600" 
-                    : "bg-transparent border-transparent text-[#6B7280] hover:bg-white/50 hover:text-[#1A1A1A]"
-                )}
-              >
-                <Icon size={18} />
-                {cat.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Main Card */}
-        <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-[#F1F1F1] p-8 md:p-10 relative overflow-hidden">
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-8 items-center">
-            
-            {/* From Section */}
-            <div className="space-y-4">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]">From</label>
-              <div className="relative group">
-                <select
-                  value={fromUnit}
-                  onChange={(e) => setFromUnit(e.target.value)}
-                  className="w-full appearance-none bg-[#F9FAFB] border border-[#E5E7EB] rounded-2xl px-4 py-3.5 pr-10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer"
-                >
-                  {UNITS[category].map(u => (
-                    <option key={u.value} value={u.value}>{u.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none group-hover:text-[#1A1A1A] transition-colors" size={16} />
+        <AnimatePresence mode="wait">
+          {!showHistory ? (
+            <motion.div
+              key="calculator"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-8"
+            >
+              {/* Category Tabs */}
+              <div className="flex flex-wrap justify-center gap-2">
+                {CATEGORIES.map((cat) => {
+                  const Icon = cat.icon;
+                  const isActive = category === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => setCategory(cat.id)}
+                      className={cn(
+                        "flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all duration-200 text-sm font-medium border",
+                        isActive 
+                          ? "bg-sky-600 border-sky-500 shadow-lg shadow-sky-900/20 text-white" 
+                          : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white"
+                      )}
+                    >
+                      <Icon size={18} />
+                      {cat.label}
+                    </button>
+                  );
+                })}
               </div>
-              <input
-                type="number"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="0"
-                className="w-full bg-white border-b-2 border-[#E5E7EB] py-4 text-4xl font-light focus:outline-none focus:border-indigo-500 transition-all placeholder:text-[#E5E7EB]"
-              />
-            </div>
 
-            {/* Swap Button */}
-            <div className="flex justify-center">
-              <button
-                onClick={handleSwap}
-                className="p-3 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors shadow-sm active:scale-95"
-                title="Swap Units"
-              >
-                <ArrowRightLeft size={20} className="rotate-90 md:rotate-0" />
-              </button>
-            </div>
+              {/* Main Card */}
+              <div className="bg-slate-900/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-800 p-8 md:p-10 relative overflow-hidden">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-8 items-center">
+                  
+                  {/* From Section */}
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Source Unit</label>
+                    <div className="relative group">
+                      <select
+                        value={fromUnit}
+                        onChange={(e) => setFromUnit(e.target.value)}
+                        className="w-full appearance-none bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3.5 pr-10 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all cursor-pointer"
+                      >
+                        {UNITS[category].map(u => (
+                          <option key={u.value} value={u.value}>{u.label}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none group-hover:text-white transition-colors" size={16} />
+                    </div>
+                    <input
+                      type="number"
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      placeholder="0"
+                      className="w-full bg-transparent border-b-2 border-slate-800 py-4 text-4xl font-light text-white focus:outline-none focus:border-sky-500 transition-all placeholder:text-slate-800"
+                    />
+                  </div>
 
-            {/* To Section */}
-            <div className="space-y-4">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]">To</label>
-              <div className="relative group">
-                <select
-                  value={toUnit}
-                  onChange={(e) => setToUnit(e.target.value)}
-                  className="w-full appearance-none bg-[#F9FAFB] border border-[#E5E7EB] rounded-2xl px-4 py-3.5 pr-10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer"
-                >
-                  {UNITS[category].map(u => (
-                    <option key={u.value} value={u.value}>{u.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] pointer-events-none group-hover:text-[#1A1A1A] transition-colors" size={16} />
-              </div>
-              <div className="relative group min-h-[72px] flex items-center">
-                <div className="text-4xl font-light text-indigo-600 break-all pr-12">
-                  {result !== null ? formatResult(result) : '0'}
+                  {/* Swap Button */}
+                  <div className="flex justify-center">
+                    <button
+                      onClick={handleSwap}
+                      className="p-3 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 hover:bg-sky-500/20 transition-colors shadow-sm active:scale-95"
+                      title="Swap Units"
+                    >
+                      <ArrowRightLeft size={20} className="rotate-90 md:rotate-0" />
+                    </button>
+                  </div>
+
+                  {/* To Section */}
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Target Unit</label>
+                    <div className="relative group">
+                      <select
+                        value={toUnit}
+                        onChange={(e) => setToUnit(e.target.value)}
+                        className="w-full appearance-none bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3.5 pr-10 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all cursor-pointer"
+                      >
+                        {UNITS[category].map(u => (
+                          <option key={u.value} value={u.value}>{u.label}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none group-hover:text-white transition-colors" size={16} />
+                    </div>
+                    <div className="relative group min-h-[72px] flex items-center">
+                      <div className="text-4xl font-light text-sky-400 break-all pr-12">
+                        {result !== null ? formatResult(result) : '0'}
+                      </div>
+                      {result !== null && (
+                        <button
+                          onClick={copyToClipboard}
+                          className="absolute right-0 p-2 text-slate-500 hover:text-sky-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          title="Copy result"
+                        >
+                          {copied ? <Check size={18} className="text-emerald-400" /> : <Copy size={18} />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                {result !== null && (
-                  <button
-                    onClick={copyToClipboard}
-                    className="absolute right-0 p-2 text-[#9CA3AF] hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                    title="Copy result"
+
+                {/* Info Banner */}
+                <div className="mt-10 pt-8 border-t border-slate-800 flex items-center gap-3 text-slate-400">
+                  <Info size={16} className="shrink-0 text-sky-500" />
+                  <p className="text-xs leading-relaxed">
+                    {category === 'speed' 
+                      ? "1 Knot is exactly 1.852 km/h (one nautical mile per hour)."
+                      : category === 'pressure'
+                      ? "Atmospheric pressure is critical for weather forecasting. Standard sea-level pressure is 1013.25 hPa."
+                      : `Converting between ${UNITS[category].length} different ${category} units for maritime navigation.`}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="history"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="bg-slate-900/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-800 p-8 md:p-10"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                  <History className="text-sky-500" size={20} />
+                  <h2 className="text-xl font-semibold text-white">Conversion History</h2>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={clearHistory}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors"
                   >
-                    {copied ? <Check size={18} className="text-emerald-500" /> : <Copy size={18} />}
+                    <Trash2 size={14} />
+                    Clear All
                   </button>
+                  <button 
+                    onClick={() => setShowHistory(false)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-medium hover:text-white transition-colors"
+                  >
+                    Back to Calculator
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {history.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500">
+                    <Clock size={40} className="mx-auto mb-4 opacity-20" />
+                    <p>No history yet. Start converting!</p>
+                  </div>
+                ) : (
+                  history.map((item) => (
+                    <div 
+                      key={item.id}
+                      className="p-4 rounded-2xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-between group hover:border-sky-500/30 transition-all"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-sky-500/70">{item.category}</span>
+                          <span className="text-[10px] text-slate-500">{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        <div className="text-sm font-medium text-slate-200">
+                          {item.input_value} <span className="text-slate-500">{item.from_unit}</span>
+                          <ArrowRightLeft size={12} className="inline mx-2 text-slate-600" />
+                          <span className="text-sky-400">{formatResult(item.output_value)}</span> <span className="text-slate-500">{item.to_unit}</span>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          setCategory(item.category as Category);
+                          setFromUnit(item.from_unit);
+                          setToUnit(item.to_unit);
+                          setInputValue(item.input_value.toString());
+                          setShowHistory(false);
+                        }}
+                        className="p-2 rounded-lg bg-sky-500/10 text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-sky-500/20"
+                        title="Restore this conversion"
+                      >
+                        <ArrowRightLeft size={16} />
+                      </button>
+                    </div>
+                  ))
                 )}
               </div>
-            </div>
-          </div>
-
-          {/* Info Banner */}
-          <div className="mt-10 pt-8 border-t border-[#F1F1F1] flex items-center gap-3 text-[#6B7280]">
-            <Info size={16} className="shrink-0" />
-            <p className="text-xs leading-relaxed">
-              {category === 'temperature' 
-                ? "Temperature conversions use standard formulas: °F = (°C × 9/5) + 32 and K = °C + 273.15."
-                : `Converting between ${UNITS[category].length} different ${category} units with high precision.`}
-            </p>
-          </div>
-        </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Footer */}
         <footer className="mt-12 text-center space-y-4">
           <div className="flex justify-center gap-8">
             <div className="text-center">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#9CA3AF] mb-1">Accuracy</p>
-              <p className="text-sm font-medium">6 Decimal Places</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Navigation</p>
+              <p className="text-sm font-medium text-slate-300">Nautical Standard</p>
             </div>
             <div className="text-center">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#9CA3AF] mb-1">Standard</p>
-              <p className="text-sm font-medium">SI & Imperial</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Precision</p>
+              <p className="text-sm font-medium text-slate-300">6 Decimal Places</p>
             </div>
           </div>
-          <p className="text-xs text-[#9CA3AF]">© 2026 Metric Master Utility. All rights reserved.</p>
+          <p className="text-xs text-slate-600">© 2026 Maritime Master Utility. For navigational reference only.</p>
         </footer>
       </motion.div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #334155;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #475569;
+        }
+      `}</style>
     </div>
   );
 }

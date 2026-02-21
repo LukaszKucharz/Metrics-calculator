@@ -1,5 +1,5 @@
 {
-  "name": "Metric Master",
-  "description": "A sleek, professional metric conversion calculator for length, weight, volume, and temperature.",
+  "name": "Maritime Metric Master",
+  "description": "A specialized conversion calculator for maritime environments, featuring nautical miles, fathoms, knots, and atmospheric pressure.",
   "requestFramePermissions": []
 }
