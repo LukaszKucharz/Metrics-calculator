@@ -30,7 +30,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type Category = 'length' | 'weight' | 'speed' | 'pressure' | 'temperature';
+type Category = 'length' | 'weight' | 'speed' | 'pressure' | 'temperature' | 'wind';
 
 interface Unit {
   label: string;
@@ -49,9 +49,26 @@ interface HistoryItem {
   timestamp: string;
 }
 
+const BEAUFORT_SCALE = [
+  { level: 0, minKt: 0, description: "Calm", seaEffect: "Sea like a mirror." },
+  { level: 1, minKt: 1, description: "Light air", seaEffect: "Ripples with appearance of scales are formed, without foam crests." },
+  { level: 2, minKt: 4, description: "Light breeze", seaEffect: "Small wavelets still short but more pronounced; crests have a glassy appearance but do not break." },
+  { level: 3, minKt: 7, description: "Gentle breeze", seaEffect: "Large wavelets; crests begin to break; foam of glassy appearance. Perhaps scattered white horses." },
+  { level: 4, minKt: 11, description: "Moderate breeze", seaEffect: "Small waves becoming longer; fairly frequent white horses." },
+  { level: 5, minKt: 17, description: "Fresh breeze", seaEffect: "Moderate waves taking a more pronounced long form; many white horses are formed. Chance of some spray." },
+  { level: 6, minKt: 22, description: "Strong breeze", seaEffect: "Large waves begin to form; the white foam crests are more extensive everywhere. Probably some spray." },
+  { level: 7, minKt: 28, description: "Near gale", seaEffect: "Sea heaps up and white foam from breaking waves begins to be blown in streaks along the direction of the wind." },
+  { level: 8, minKt: 34, description: "Gale", seaEffect: "Moderately high waves of greater length; edges of crests break into spindrift. Foam is blown in well-marked streaks." },
+  { level: 9, minKt: 41, description: "Strong gale", seaEffect: "High waves. Dense streaks of foam along the direction of the wind. Sea begins to roll. Spray may affect visibility." },
+  { level: 10, minKt: 48, description: "Storm", seaEffect: "Very high waves with long overhanging crests. Resulting foam in great patches is blown in dense white streaks." },
+  { level: 11, minKt: 56, description: "Violent storm", seaEffect: "Exceptionally high waves. Sea is completely covered with long white patches of foam. Visibility affected." },
+  { level: 12, minKt: 64, description: "Hurricane", seaEffect: "The air is filled with foam and spray. Sea completely white with driving spray; visibility very seriously affected." },
+];
+
 const CATEGORIES: { id: Category; label: string; icon: any }[] = [
   { id: 'length', label: 'Distance', icon: Ruler },
   { id: 'speed', label: 'Speed', icon: Anchor },
+  { id: 'wind', label: 'Wind', icon: Wind },
   { id: 'pressure', label: 'Pressure', icon: Gauge },
   { id: 'temperature', label: 'Weather', icon: Thermometer },
   { id: 'weight', label: 'Weight', icon: Scale },
@@ -68,6 +85,13 @@ const UNITS: Record<Category, Unit[]> = {
     { label: 'Miles (mi)', value: 'mi', factor: 1609.344 },
   ],
   speed: [
+    { label: 'Knots (kt)', value: 'kt', factor: 1.852 },
+    { label: 'm/s', value: 'ms', factor: 3.6 },
+    { label: 'km/h', value: 'kmh', factor: 1 },
+    { label: 'mph', value: 'mph', factor: 1.60934 },
+  ],
+  wind: [
+    { label: 'Beaufort Scale', value: 'bf' },
     { label: 'Knots (kt)', value: 'kt', factor: 1.852 },
     { label: 'm/s', value: 'ms', factor: 3.6 },
     { label: 'km/h', value: 'kmh', factor: 1 },
@@ -108,6 +132,16 @@ export default function App() {
     setFromUnit(units[0].value);
     setToUnit(units[1]?.value || units[0].value);
   }, [category]);
+
+  // Clamp input value for Beaufort scale
+  useEffect(() => {
+    if (category === 'wind' && fromUnit === 'bf') {
+      const val = parseFloat(inputValue);
+      if (val > 12) {
+        setInputValue('12');
+      }
+    }
+  }, [category, fromUnit]);
 
   // Fetch history on mount
   useEffect(() => {
@@ -171,6 +205,34 @@ export default function App() {
       if (toUnit === 'F') return celsius * (9 / 5) + 32;
       if (toUnit === 'K') return celsius + 273.15;
       return celsius;
+    } else if (category === 'wind') {
+      // Special handling for Beaufort Scale
+      let baseValueKmH = 0;
+      if (fromUnit === 'bf') {
+        const level = Math.max(0, Math.min(12, Math.floor(val)));
+        const bft = BEAUFORT_SCALE[level];
+        baseValueKmH = bft.minKt * 1.852;
+      } else {
+        const from = UNITS.wind.find(u => u.value === fromUnit);
+        if (!from || !from.factor) return null;
+        baseValueKmH = val * from.factor;
+      }
+
+      if (toUnit === 'bf') {
+        const knots = baseValueKmH / 1.852;
+        let level = 0;
+        for (let i = BEAUFORT_SCALE.length - 1; i >= 0; i--) {
+          if (knots >= BEAUFORT_SCALE[i].minKt) {
+            level = i;
+            break;
+          }
+        }
+        return level;
+      } else {
+        const to = UNITS.wind.find(u => u.value === toUnit);
+        if (!to || !to.factor) return null;
+        return baseValueKmH / to.factor;
+      }
     } else {
       const units = UNITS[category];
       const from = units.find(u => u.value === fromUnit);
@@ -296,7 +358,16 @@ export default function App() {
                     <input
                       type="number"
                       value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
+                      onChange={(e) => {
+                        let val = e.target.value;
+                        if (category === 'wind' && fromUnit === 'bf') {
+                          const num = parseFloat(val);
+                          if (num > 12) val = '12';
+                        }
+                        setInputValue(val);
+                      }}
+                      max={category === 'wind' && fromUnit === 'bf' ? 12 : undefined}
+                      min={category === 'wind' && fromUnit === 'bf' ? 0 : undefined}
                       placeholder="0"
                       className="w-full bg-transparent border-b-2 border-slate-800 py-4 text-4xl font-light text-white focus:outline-none focus:border-sky-500 transition-all placeholder:text-slate-800"
                     />
@@ -346,15 +417,39 @@ export default function App() {
                 </div>
 
                 {/* Info Banner */}
-                <div className="mt-10 pt-8 border-t border-slate-800 flex items-center gap-3 text-slate-400">
-                  <Info size={16} className="shrink-0 text-sky-500" />
-                  <p className="text-xs leading-relaxed">
-                    {category === 'speed' 
-                      ? "1 Knot is exactly 1.852 km/h (one nautical mile per hour)."
-                      : category === 'pressure'
-                      ? "Atmospheric pressure is critical for weather forecasting. Standard sea-level pressure is 1013.25 hPa."
-                      : `Converting between ${UNITS[category].length} different ${category} units for maritime navigation.`}
-                  </p>
+                <div className="mt-10 pt-8 border-t border-slate-800 space-y-4">
+                  {category === 'wind' && result !== null && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-4 rounded-2xl bg-sky-500/5 border border-sky-500/10 space-y-2"
+                    >
+                      <div className="flex items-center gap-2 text-sky-400 font-semibold text-sm">
+                        <Wind size={16} />
+                        Beaufort Force {fromUnit === 'bf' ? Math.max(0, Math.min(12, Math.floor(parseFloat(inputValue)))) : Math.max(0, Math.min(12, Math.floor(toUnit === 'bf' ? result : 0)))}
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed italic">
+                        "{BEAUFORT_SCALE[Math.max(0, Math.min(12, Math.floor(fromUnit === 'bf' ? parseFloat(inputValue) : (toUnit === 'bf' ? result : 0))))].description}"
+                      </p>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        <span className="text-slate-500 font-medium uppercase text-[10px] tracking-wider block mb-1">Sea Effect:</span>
+                        {BEAUFORT_SCALE[Math.max(0, Math.min(12, Math.floor(fromUnit === 'bf' ? parseFloat(inputValue) : (toUnit === 'bf' ? result : 0))))].seaEffect}
+                      </p>
+                    </motion.div>
+                  )}
+                  
+                  <div className="flex items-center gap-3 text-slate-400">
+                    <Info size={16} className="shrink-0 text-sky-500" />
+                    <p className="text-xs leading-relaxed">
+                      {category === 'speed' 
+                        ? "1 Knot is exactly 1.852 km/h (one nautical mile per hour)."
+                        : category === 'pressure'
+                        ? "Atmospheric pressure is critical for weather forecasting. Standard sea-level pressure is 1013.25 hPa."
+                        : category === 'wind'
+                        ? "The Beaufort scale is an empirical measure that relates wind speed to observed conditions at sea or on land."
+                        : `Converting between ${UNITS[category].length} different ${category} units for maritime navigation.`}
+                    </p>
+                  </div>
                 </div>
               </div>
             </motion.div>
